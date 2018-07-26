@@ -1,3 +1,86 @@
+# Play = [00,80,C0,E0,F0,E0,C0,80,00]
+# Stop = [00,00,F8,F8,F8,F8,F8,00,00]
+
+#!/usr/bin/env python
+#
+# Note: Keep customer characters in the range 0 - 127 as unicode
+#       can't handle codes above 127.
+
+from samplebase import SampleBase
+from rgbmatrix import graphics, RGBMatrixOptions
+import time, datetime
+import random
+import datetime, time
+from pytz import timezone
+from whenareyou import whenareyou  # pip install whenareyou
+#from playsound import playsound  # pip install playsound
+#import pyaudio, wave, sys
+import subprocess
+#from PIL import Image  #<< Only included because pyinstaller doesn't work without it.
+
+GreenBinReferenceDate = datetime.date(2017, 01, 24)  # Tuesday of a green bin week
+defaultTrackPosY = trackPosY = 7
+#trackDisplayDelay = 300  # Number of seconds to leave the track on screen after the player mode has been changed to Stop. # << Doesn't need to be global.
+#playerStoppedTime = 0
+rollTime = None
+worldTimeZone = None
+worldTimeOffsetY = 0
+defaultWorldTimeOffsetY = 17
+wtCity = None
+#doorBellSound = AudioFile(r'/home/pi/rpi-rgb-led-matrix/python/samples/Doorbell.wav')
+doorBellSound = r'/home/pi/rpi-rgb-led-matrix/python/samples/Doorbell.wav'
+
+
+import paho.mqtt.client as MQTT
+MQTTServer = '192.168.1.49'
+
+LMSDisplayTopic = '/squeezebox/pool/track'
+LMSTimeRemainingTopic = '/squeezebox/pool/remaining'
+LMSModeTopic = '/squeezebox/mode/pool'
+
+ControlTopic = 'kitchen/display/#'
+MatrixSetBrightnessTopic = 'kitchen/display/brightness'
+MatrixGetBrightnessTopic = '/ledmatrix/mungurrahill/kitchen/getBrightness'
+
+#LocalTimeTopic = '/time/local'
+TemperatureTopic = 'sensor/#' #mungurrahill/#'
+DeckTemperatureTopic = 'sensor/temperature/deck'
+LoungeRoomTempTopic = 'sensor/temperature/lounge_room'
+StudyTempTopic = 'sensor/temperature/study'
+KitchenTempTopic = 'sensor/temperature/kitchen'
+PoolTempTopic = 'sensor/temperature/pool'
+SpaTempTopic = 'sensor/temperature/spa'
+OutsideTempTopic = 'sensor/temperature/outside'
+
+HumidityTopic = '/humidity/mungurrahill/#'
+DeckHumidityTopic = '/humidity/mungurrahill/deck'
+OutsideHumidityTopic = '/humidity/mungurrahill/outside'
+
+PressureTopic = '/pressure/mungurrahill/#'
+OutsidePressureTopic = '/pressure/mungurrahill/outside'
+
+DoorBellTopic = '/door/mungurrahill/front'
+
+WorldTimeTopic = 'kitchen/display/worldtime'  # '/time/timezone'
+
+DoorBellTopic = '/door/mungurrahill/front'
+
+#class AudioFile:
+#    chunk = 1024
+#
+#    def __init__(self, file):
+#        """ Init audio stream """ 
+#        self.wf = wave.open(file, 'rb')
+#        self.p = pyaudio.PyAudio()
+#        self.stream = self.p.open(
+#            format = self.p.get_format_from_width(self.wf.getsampwidth()),
+#            channels = self.wf.getnchannels(),
+#            rate = self.wf.getframerate(),
+#            output = True
+#        )
+#
+
+
 #    def play(self):
 #        """ Play entire file """
 #        data = self.wf.readframes(self.chunk)
