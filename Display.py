@@ -1,3 +1,4 @@
+
 # Play = [00,80,C0,E0,F0,E0,C0,80,00]
 # Stop = [00,00,F8,F8,F8,F8,F8,00,00]
 
@@ -30,6 +31,8 @@ wtCity = None
 #doorBellSound = AudioFile(r'/home/pi/rpi-rgb-led-matrix/python/samples/Doorbell.wav')
 doorBellSound = r'/home/pi/rpi-rgb-led-matrix/python/samples/Doorbell.wav'
 
+# Wakeword heard and now listening for user input.
+listening = False
 
 import paho.mqtt.client as MQTT
 MQTTServer = '192.168.1.49'
@@ -65,11 +68,14 @@ WorldTimeTopic = 'kitchen/display/worldtime'  # '/time/timezone'
 
 DoorBellTopic = '/door/mungurrahill/front'
 
+WakeWordTopic = 'kitchen/display/wakeword'
+UserUtteranceTopic = 'kitchen/display/utterance'
+
 #class AudioFile:
 #    chunk = 1024
 #
 #    def __init__(self, file):
-#        """ Init audio stream """ 
+#        """ Init audio stream """
 #        self.wf = wave.open(file, 'rb')
 #        self.p = pyaudio.PyAudio()
 #        self.stream = self.p.open(
@@ -79,8 +85,6 @@ DoorBellTopic = '/door/mungurrahill/front'
 #            output = True
 #        )
 #
-
-
 #    def play(self):
 #        """ Play entire file """
 #        data = self.wf.readframes(self.chunk)
@@ -89,13 +93,13 @@ DoorBellTopic = '/door/mungurrahill/front'
 #            data = self.wf.readframes(self.chunk)
 #
 #    def close(self):
-#        """ Graceful shutdown """ 
+#        """ Graceful shutdown """
 #        self.stream.close()
 #        self.p.terminate()
 
 class AudioFile:
     def __init__(self, file):
-        """ Init audio stream """ 
+        """ Init audio stream """
         self.wf = wave.open(file, 'rb')
         self.p = pyaudio.PyAudio()
         self.stream = self.p.open(
@@ -137,8 +141,8 @@ def on_connect(mqttClient, userdata, flags, rc): # Works with paho mqtt version 
     mqttClient.loop_start() #<<< WHY IS THIS ALSO IN THE __MAIN__ FUNCTION??????
 
 def on_message(mqttClient, userdata, msg):
-    global track, timeRemaining, mode, prevMode, modeChanged, decktemp, formaltemp, kitchentemp, pooltemp, spatemp, studytemp, playerStoppedTime, trackRolledOff, defaultTrackPosY, trackPosY, trackDisplayed, rollTime, worldTimeZone, worldTimeOffsetY, wtCity  #, localtime
-    print('Topic: %s, \nMessage: %s' %(msg.topic, msg.payload))
+    global track, timeRemaining, mode, prevMode, modeChanged, decktemp, formaltemp, kitchentemp, pooltemp, spatemp, studytemp, playerStoppedTime, trackRolledOff, defaultTrackPosY, trackPosY, trackDisplayed, rollTime, worldTimeZone, worldTimeOffsetY, wtCity, listening, utterance, utteranceDisplayed  #, localtime
+#    print('Topic: %s, \nMessage: %s' %(msg.topic, msg.payload))
     if msg.topic == LMSDisplayTopic:
         track = msg.payload
         #for l in track:
@@ -158,23 +162,33 @@ def on_message(mqttClient, userdata, msg):
             trackPosY = defaultTrackPosY
             trackDisplayed = True
         return
+    elif msg.topic == UserUtteranceTopic:
+        utterance = msg.payload
+        utteranceDisplayed = True
+        return
     elif msg.topic == DeckTemperatureTopic:
         decktemp = msg.payload + chr(126)
         return
     elif msg.topic == KitchenTempTopic:
         kitchentemp = msg.payload + chr(126)
-	return
+        return
     elif msg.topic == LoungeRoomTempTopic:
         formaltemp = msg.payload + chr(126)
         return
     elif msg.topic == StudyTempTopic:
         studytemp = msg.payload + chr(126)
-  	return
+        return
     elif msg.topic == PoolTempTopic:
         pooltemp = msg.payload + chr(126)
         return
     elif msg.topic == SpaTempTopic:
         spatemp = msg.payload + chr(126)
+        return
+    elif msg.topic == WakeWordTopic:
+        if msg.payload == 'begin':
+            listening = True
+        else:
+            listening = False
         return
     elif msg.topic == LMSTimeRemainingTopic:
         mins = str(int(msg.payload) / 60)
@@ -203,7 +217,7 @@ def on_message(mqttClient, userdata, msg):
         #doorBellSound.close()
         #doorBellSound.stream.start_stream()
 #        subprocess.Popen(['aplay', doorBellSound]) ## <<-- THIS WORKS!
-	subprocess.Popen("aplay Doorbell.wav", shell=True)  # from https://community.mycroft.ai/t/need-help-creating-a-sounds-skill-doable-not-doable/2234
+        subprocess.Popen("aplay Doorbell.wav", shell=True)  # from https://community.mycroft.ai/t/need-help-creating-a-sounds-skill-doable-not-doable/2234
         return
     elif msg.topic == MatrixSetBrightnessTopic:
         parser.setBrightness(int(msg.payload))
@@ -225,11 +239,13 @@ class Display(SampleBase):
         super(Display, self).__init__(*args, **kwargs)
 
     def run(self):
-        global modeChanged, prevMode, trackRolledOff, playerStoppedTime, trackDisplayed, trackPosY, rollTime, worldTimeZone, worldTimeOffsetY, wtCity  #, trackDisplayDelay
+        global modeChanged, prevMode, trackRolledOff, playerStoppedTime, trackDisplayed, trackPosY, rollTime, worldTimeZone, worldTimeOffsetY, wtCity, listening, utterance, utteranceDisplayed  #, trackDisplayDelay
 
         offscreenCanvas = self.matrix.CreateFrameCanvas()
 
         # Define fonts.
+        utterancefont = graphics.Font()
+        utterancefont.LoadFont("../../fonts/4x6.bdf")
         trackfont = graphics.Font()
         trackfont.LoadFont("../../fonts/6x9.bdf")
         symbolfont = graphics.Font()
@@ -265,26 +281,26 @@ class Display(SampleBase):
 
 
         # Set up screen positions.
-        maxX = trackPosX = offscreenCanvas.width
+        maxX = trackPosX = utterancePosX = offscreenCanvas.width
         posX = 0
         #y = offscreenCanvas.height
-        timePosX = 0
-        timePosY = 4 ####### <<<<< Set back to 13
+        timePosX = 1
+        timePosY = 5 ####### <<<<< Set back to 13
         dayTextPosX = 43
-        dayTextPosY = -2 #0 #7
-        dateTextPosX = 43
-        dateTextPosY = 4 #13
-        temp_0_PosX = 0
+        dayTextPosY = -1 #0 #7
+        dateTextPosX = 42
+        dateTextPosY = 5 #13
+        temp_0_PosX = 2
         temp_1_PosX = 33
         tempTextLine_0_PosY = 18 #22 #29
-        tempLine_0_PosY = 25 #29 #36	
+        tempLine_0_PosY = 25 #29 #36
         tempTextLine_1_PosY = 32 #36 #43
         tempLine_1_PosY = 39 #43 #50
         tempTextLine_2_PosY = 46 #50 #57
         tempLine_2_PosY = 53 #57 #64
         #tempLine_3_PosY = 64
         #tempTextLine_3_PosY = 64
-	
+
         # Set up some configurable parameters.
         trackDisplayed = True #False   # Control whether the track is displayed.
         print 'Went passed here again'
@@ -293,6 +309,8 @@ class Display(SampleBase):
         trackOffsetY = trackPosY + 1
         #localTimeOffsetY = 13
         #trackRollOffPosY = trackPosY
+
+        utterancePosY = 0
 
         # Get the current mode of LMS.
         mqttClient.publish('/squeezebox/control', 'mode')
@@ -323,6 +341,9 @@ class Display(SampleBase):
         lastScroll = time.time()
         scrollDelay = 0.035
 
+        # Define utterance scrolling parameters
+        utteranceLastScroll = time.time()
+
         while True:
             offscreenCanvas.Clear()
             #print mode, trackDisplayed
@@ -335,7 +356,7 @@ class Display(SampleBase):
                 # If no track playing set text to start at left of screen and set a timer to remove the track display
                 # after a configurable amount of time.
                 if mode == 'stop':
-                    symbolDisplayed = mode  #modeSymbol[mode]  # << Remove this after testing. 
+                    symbolDisplayed = mode  #modeSymbol[mode]  # << Remove this after testing.
                     if prevMode != 'stop':
                         if modeChanged:
                             symbolPosX = -5
@@ -343,7 +364,7 @@ class Display(SampleBase):
                             r = 0
                             modeChanged = False
                             rollTime = time.time()
-                        elif symbolPosX < 0 and trackPosXx < 6: 
+                        elif symbolPosX < 0 and trackPosXx < 6:
                             symbolPosX += 1
                             trackPosXx += 1
                             pulseTime = time.time()
@@ -358,7 +379,7 @@ class Display(SampleBase):
                                 colorIndex = self.valmap(breatheTable[r], 0, 254, 20, 190)
                                 playerStatusColor = graphics.Color(colorIndex, 0, 0)
                     #graphics.DrawText(offscreenCanvas, trackfont, symbolPosX, trackPosY , playerStatusColor, '*')
-                    # If the player is stopped and the delay time has been reached then roll the track off the display. 
+                    # If the player is stopped and the delay time has been reached then roll the track off the display.
                     if time.time() - playerStoppedTime > trackDisplayDelay:
                         if not trackRolledOff and (time.time() - rollTime > 0.35):
                             rollTime = time.time()
@@ -412,7 +433,7 @@ class Display(SampleBase):
                     if prevMode != 'play':
                         # If there is a symbol still displayed from a previous mode, scroll it off.
                         if len(symbolDisplayed) > 0 and symbolDisplayed in ['pause', 'stop']:
-                            #print 'Passed this test. symbolDisplayed: %s symbolPosX: %s  trackPosXx: %s' %(symbolDisplayed,symbolPosX, trackPosXx)  
+                            #print 'Passed this test. symbolDisplayed: %s symbolPosX: %s  trackPosXx: %s' %(symbolDisplayed,symbolPosX, trackPosXx)
                             # Roll the current symbol off the screen before displaying the new one.
                             if symbolPosX > -5 and trackPosXx > 1:
                                 #print 'and passed this test'
@@ -439,7 +460,7 @@ class Display(SampleBase):
                             symbolDisplayed = 'rollon'
                         # If the current mode's symbol is not fully displayed, scroll it on.
                         elif symbolDisplayed == 'rollon':
-                            #print symbolPosX, trackPosXx  
+                            #print symbolPosX, trackPosXx
                             if symbolPosX < 0 and trackPosXx < 6:
                                 if time.time() - rollTime > 0.25:
                                     symbolPosX += 1
@@ -496,20 +517,20 @@ class Display(SampleBase):
                         lastScroll = time.time()
                         trackPosX -= 1
                         if (trackPosX + length < 0):
-                            trackPosX = maxX                
+                            trackPosX = maxX
 
             # Display the local time and date.
             graphics.DrawText(offscreenCanvas, hourMinuteFont, timePosX, timePosY+trackPosY, timeColor, time.strftime('%H:%M'))
             graphics.DrawText(offscreenCanvas, secondsFont, timePosX+31, timePosY+trackPosY, timeColor, time.strftime('%S'))
             # Colour the date and day based on the bin type for the week (i.e. Green waste or Recycle).
-            if (dateOfNextMonday() - GreenBinReferenceDate ).days%14 == 6: 
+            if (dateOfNextMonday() - GreenBinReferenceDate ).days%14 == 6:
                 #Green Bin
-                dayDateTextColor = greenBinColor 
+                dayDateTextColor = greenBinColor
             else:
                 # Yellow Bin
-                dayDateTextColor = yellowBinColor  
+                dayDateTextColor = yellowBinColor
             graphics.DrawText(offscreenCanvas, dayDateFont, dayTextPosX, dayTextPosY+trackPosY, dayDateTextColor, time.strftime('%a'))
-            graphics.DrawText(offscreenCanvas, dayDateFont, dateTextPosX, dateTextPosY+trackPosY, dayDateTextColor, time.strftime('%d %b'))              
+            graphics.DrawText(offscreenCanvas, dayDateFont, dateTextPosX, dateTextPosY+trackPosY, dayDateTextColor, time.strftime('%d %b'))
 
             # Display the world time and date.
             if worldTimeZone:
@@ -519,9 +540,28 @@ class Display(SampleBase):
                 worldTime = datetime.datetime.now(worldTimeZone)
                 graphics.DrawText(offscreenCanvas, wtCityFont, timePosX, timePosY+worldTimeOffsetY+trackPosY-10, worldTimeColor, wtCity)
                 graphics.DrawText(offscreenCanvas, wtHourMinuteFont, timePosX, timePosY+worldTimeOffsetY+trackPosY, worldTimeColor, worldTime.strftime('%H:%M'))
-                graphics.DrawText(offscreenCanvas, wtSecondsFont, timePosX+31, timePosY+worldTimeOffsetY+trackPosY, worldTimeColor, worldTime.strftime('%S')) 
+                graphics.DrawText(offscreenCanvas, wtSecondsFont, timePosX+31, timePosY+worldTimeOffsetY+trackPosY, worldTimeColor, worldTime.strftime('%S'))
                 graphics.DrawText(offscreenCanvas, dayDateFont, dayTextPosX, dayTextPosY+worldTimeOffsetY+trackPosY, worldTimeColor, worldTime.strftime('%a'))
-                graphics.DrawText(offscreenCanvas, dayDateFont, dateTextPosX, dateTextPosY+worldTimeOffsetY+trackPosY, worldTimeColor, worldTime.strftime('%d %b')) 
+                graphics.DrawText(offscreenCanvas, dayDateFont, dateTextPosX, dateTextPosY+worldTimeOffsetY+trackPosY, worldTimeColor, worldTime.strftime('%d %b'))
+
+            if listening:
+                # Draw a red square around the perimiter of the screen.
+                graphics.DrawLine(offscreenCanvas, 0, 0, 0, 63, trackColor)
+                graphics.DrawLine(offscreenCanvas, 0, 63, 63, 63, trackColor)
+                graphics.DrawLine(offscreenCanvas, 63, 63, 63, 0, trackColor)
+                graphics.DrawLine(offscreenCanvas, 0, 0, 63, 0, trackColor)
+
+            # Display the utterance
+            if utteranceDisplayed:
+                utteranceLength = graphics.DrawText(offscreenCanvas, utterancefont, utterancePosX, 63, trackColor, utterance)
+                # Scroll the text from right to left.
+                if time.time() - utteranceLastScroll > scrollDelay:
+                    utteranceLastScroll = time.time()
+                    utterancePosX -= 1
+                    if (utterancePosX + utteranceLength < 1):
+                        utterancePosX = maxX
+
+
 
             graphics.DrawText(offscreenCanvas, tempTextFont, temp_0_PosX, tempTextLine_0_PosY+worldTimeOffsetY, temperatureTextColor, 'Kitchen')
             graphics.DrawText(offscreenCanvas, tempFont, temp_0_PosX, tempLine_0_PosY+worldTimeOffsetY, tempColor, kitchentemp)
@@ -543,7 +583,7 @@ class Display(SampleBase):
             offscreenCanvas = self.matrix.SwapOnVSync(offscreenCanvas)
 
     def valmap(self, x, inMin, inMax, outMin, outMax):
-        return int((x - inMin) * (outMax - outMin) / (inMax - inMin) + outMin)    
+        return int((x - inMin) * (outMax - outMin) / (inMax - inMin) + outMin)  
 
 
 # Main function
@@ -560,6 +600,8 @@ if __name__ == "__main__":
     ### CONSIDER MOVING THESE OUTSIDE OF ANY FUNCTIONS (i.e. Near the GreenBinReferenceDate). ###
     ### THEN MAY NOT NEED THE GLOBAL DECLARATION IN on_message().                             ###
     track = ''
+    utterance = ''
+    utteranceDisplayed = False
     mode = None
     prevMode = mode
     modeChanged = False #True
