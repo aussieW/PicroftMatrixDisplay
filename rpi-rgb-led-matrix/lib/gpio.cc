@@ -111,7 +111,7 @@ uint32_t GPIO::InitOutputs(uint32_t outputs) {
   // (TODO: this really only needs to be done in the Adafruit HAT case, so
   // we should exclude the other cases).
   INP_GPIO(4);
-  INP_GPIO(18);
+//  INP_GPIO(18);
 
   outputs &= kValidBits;   // Sanitize input.
   output_bits_ = outputs;
