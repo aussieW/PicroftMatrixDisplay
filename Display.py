@@ -18,8 +18,10 @@ from whenareyou import whenareyou  # pip install whenareyou
 import subprocess
 #from PIL import Image  #<< Only included because pyinstaller doesn't work without it.
 
+import json
+
 GreenBinReferenceDate = datetime.date(2017, 01, 24)  # Tuesday of a green bin week
-defaultTrackPosY = trackPosY = 7
+defaultTrackPosY = trackPosY = 63
 #trackDisplayDelay = 300  # Number of seconds to leave the track on screen after the player mode has been changed to Stop. # << Doesn't need to be global.
 #playerStoppedTime = 0
 rollTime = None
@@ -29,6 +31,9 @@ defaultWorldTimeOffsetY = 17
 wtCity = None
 #doorBellSound = AudioFile(r'/home/pi/rpi-rgb-led-matrix/python/samples/Doorbell.wav')
 doorBellSound = r'/home/pi/rpi-rgb-led-matrix/python/samples/Doorbell.wav'
+
+utteranceTime = 0
+
 
 # Wakeword heard and now listening for user input.
 listening = False
@@ -45,13 +50,14 @@ MatrixSetBrightnessTopic = 'kitchen/display/brightness'
 MatrixGetBrightnessTopic = '/ledmatrix/mungurrahill/kitchen/getBrightness'
 
 #LocalTimeTopic = '/time/local'
-TemperatureTopic = 'sensor/#' #mungurrahill/#'
+MQTTGatewayTopic = 'home/OpenMQTTGateway/#'
+TemperatureTopic = 'sensor/#'
 DeckTemperatureTopic = 'sensor/temperature/deck'
 LoungeRoomTempTopic = 'sensor/temperature/lounge_room'
 StudyTempTopic = 'sensor/temperature/study'
 KitchenTempTopic = 'sensor/temperature/kitchen'
-PoolTempTopic = 'sensor/temperature/pool'
-SpaTempTopic = 'sensor/temperature/spa'
+PoolTempTopic = 'home/OpenMQTTGateway/RFM69toMQTT/99'  #'sensor/temperature/pool'
+CellarTempTopic = 'home/OpenMQTTGateway/RFM69toMQTT/98'
 OutsideTempTopic = 'sensor/temperature/outside'
 
 HumidityTopic = '/humidity/mungurrahill/#'
@@ -136,12 +142,13 @@ def on_connect(mqttClient, userdata, flags, rc): # Works with paho mqtt version 
     mqttClient.subscribe(WorldTimeTopic)
     mqttClient.subscribe(DoorBellTopic)
     mqttClient.subscribe(ControlTopic)
+    mqttClient.subscribe(MQTTGatewayTopic)
     #mqttClient.subscribe(LocalTimeTopic)
     mqttClient.loop_start() #<<< WHY IS THIS ALSO IN THE __MAIN__ FUNCTION??????
 
 def on_message(mqttClient, userdata, msg):
-    global track, timeRemaining, mode, prevMode, modeChanged, decktemp, formaltemp, kitchentemp, pooltemp, spatemp, studytemp, playerStoppedTime, trackRolledOff, defaultTrackPosY, trackPosY, trackDisplayed, rollTime, worldTimeZone, worldTimeOffsetY, wtCity, listening, utterance, utteranceDisplayed  #, localtime
-#    print('Topic: %s, \nMessage: %s' %(msg.topic, msg.payload))
+    global track, timeRemaining, mode, prevMode, modeChanged, decktemp, formaltemp, kitchentemp, pooltemp, spatemp, studytemp, cellartemp, winetemp, playerStoppedTime, trackRolledOff, defaultTrackPosY, trackPosY, trackDisplayed, rollTime, worldTimeZone, worldTimeOffsetY, wtCity, listening, utterance, utteranceDisplayed, utteranceTime  #, localtime
+    print('Topic: %s, \nMessage: %s' %(msg.topic, msg.payload))
     if msg.topic == LMSDisplayTopic:
         track = msg.payload
         #for l in track:
@@ -164,25 +171,46 @@ def on_message(mqttClient, userdata, msg):
     elif msg.topic == UserUtteranceTopic:
         utterance = msg.payload
         utteranceDisplayed = True
+        utteranceTime = time.time()
         return
     elif msg.topic == DeckTemperatureTopic:
-        decktemp = msg.payload + chr(126)
+        decktemp = msg.payload #+ chr(126)
         return
     elif msg.topic == KitchenTempTopic:
-        kitchentemp = msg.payload + chr(126)
+        kitchentemp = msg.payload #+ chr(126)
 	return
     elif msg.topic == LoungeRoomTempTopic:
-        formaltemp = msg.payload + chr(126)
+        formaltemp = msg.payload #+ chr(126)
         return
     elif msg.topic == StudyTempTopic:
-        studytemp = msg.payload + chr(126)
+        studytemp = msg.payload #+ chr(126)
   	return
     elif msg.topic == PoolTempTopic:
-        pooltemp = msg.payload + chr(126)
-        return
-    elif msg.topic == SpaTempTopic:
-        spatemp = msg.payload + chr(126)
-        return
+        m_decode = str(msg.payload.decode("utf-8", "ignore"))
+        try:
+            data = json.loads(m_decode)
+            params = data.get("data",{})
+            m_decode = str(params.decode("utf-8", "ignore"))
+            m_in = json.loads(m_decode)
+            pooltemp = str(m_in["pool"]) #+ chr(126)
+            spatemp = str(m_in["spa"]) #+ chr(126)
+        except Exception as ex:
+            template = "An exception of type {0} occurred. Arguments:\n{1!r}"
+            message = template.format(type(ex).__name__, ex.args)
+            print message
+    elif msg.topic == CellarTempTopic:
+        m_decode = str(msg.payload.decode("utf-8", "ignore"))
+        try:
+            data = json.loads(m_decode)
+            params = data.get("data",{})
+            m_decode = str(params.decode("utf-8", "ignore"))
+            m_in = json.loads(m_decode)
+            cellartemp = str(m_in["cellar"]) #+ chr(126)
+            winetemp = str(m_in["bottle"]) #+ chr(126)
+        except Exception as ex:
+            template = "An exception of type {0} occurred. Arguments:\n{1!r}"
+            message = template.format(type(ex).__name__, ex.args)
+            print message
     elif msg.topic == WakeWordTopic:
         if msg.payload == 'begin':
             listening = True
@@ -220,7 +248,7 @@ def on_message(mqttClient, userdata, msg):
         return
     elif msg.topic == MatrixSetBrightnessTopic:
         parser.setBrightness(int(msg.payload))
-        print('Brightness set to %s' %msg.payload)
+        #print('Brightness set to %s' %msg.payload)
     elif msg.topic == MatrixGetBrightnessTopic:
         print parser.getBrightness()
 
@@ -238,15 +266,15 @@ class Display(SampleBase):
         super(Display, self).__init__(*args, **kwargs)
 
     def run(self):
-        global modeChanged, prevMode, trackRolledOff, playerStoppedTime, trackDisplayed, trackPosY, rollTime, worldTimeZone, worldTimeOffsetY, wtCity, listening, utterance, utteranceDisplayed  #, trackDisplayDelay
+        global modeChanged, prevMode, trackRolledOff, playerStoppedTime, trackDisplayed, trackPosY, rollTime, worldTimeZone, worldTimeOffsetY, wtCity, listening, utterance, utteranceDisplayed, utteranceTime  #, trackDisplayDelay
 
         offscreenCanvas = self.matrix.CreateFrameCanvas()
 
         # Define fonts.
         utterancefont = graphics.Font()
         utterancefont.LoadFont("../../fonts/4x6.bdf")
-        trackfont = graphics.Font()
-        trackfont.LoadFont("../../fonts/6x9.bdf")
+        trackfont = utterancefont
+        #trackfont.LoadFont("../../fonts/6x9.bdf")
         symbolfont = graphics.Font()
         symbolfont.LoadFont("../../fonts/6x9_Symbols.bdf")
         hourMinuteFont = graphics.Font()
@@ -264,7 +292,7 @@ class Display(SampleBase):
         tempTextFont = graphics.Font()
         tempTextFont.LoadFont("../../fonts/4x6.bdf")
         tempFont = graphics.Font()
-        tempFont.LoadFont("../../fonts/5x7.bdf")
+        tempFont.LoadFont("../../fonts/4x6.bdf")
 
         # Define font colours.
         trackColor = graphics.Color(255,0,0)
@@ -284,32 +312,34 @@ class Display(SampleBase):
         posX = 0
         #y = offscreenCanvas.height
         timePosX = 1
-        timePosY = 5 ####### <<<<< Set back to 13
+        timePosY = 13 ####### <<<<< Set back to 13
         dayTextPosX = 43
-        dayTextPosY = -1 #0 #7
+        dayTextPosY = 7 #0 #7
         dateTextPosX = 42
-        dateTextPosY = 5 #13
+        dateTextPosY = 13 #13
         temp_0_PosX = 2
-        temp_1_PosX = 33
-        tempTextLine_0_PosY = 18 #22 #29
-        tempLine_0_PosY = 25 #29 #36	
-        tempTextLine_1_PosY = 32 #36 #43
-        tempLine_1_PosY = 39 #43 #50
-        tempTextLine_2_PosY = 46 #50 #57
-        tempLine_2_PosY = 53 #57 #64
+        temp_1_PosX = 22
+        temp_2_PosX = 43
+        tempTextLine_0_PosY = 20 #22 #29
+        tempLine_0_PosY = 27 #29 #36	
+        tempTextLine_1_PosY = 35 #36 #43
+        tempLine_1_PosY = 42 #43 #50
+        tempTextLine_2_PosY = 50 #50 #57
+        tempLine_2_PosY = 57 #57 #64
         #tempLine_3_PosY = 64
         #tempTextLine_3_PosY = 64
 	
         # Set up some configurable parameters.
         trackDisplayed = True #False   # Control whether the track is displayed.
-        print 'Went passed here again'
+        #print 'Went passed here again'
         trackDisplayDelay = 10 #300  # Number of seconds to leave the track on screen after the player mode has been changed to Stop.
-        trackPosY = 7
+        trackPosY = 63  # Use scrollingTextPosY instead.
         trackOffsetY = trackPosY + 1
         #localTimeOffsetY = 13
         #trackRollOffPosY = trackPosY
 
-        utterancePosY = 0
+        utterancePosY = scrollingTextPosY = 63   # Remove references to utterancePosY and trackPosY
+        utteranceTimeout = 15  # The number of seconds that an utterance will be display on the screen.
 
         # Get the current mode of LMS.
         mqttClient.publish('/squeezebox/control', 'mode')
@@ -347,7 +377,7 @@ class Display(SampleBase):
             offscreenCanvas.Clear()
             #print mode, trackDisplayed
             # Display track information.
-            if trackDisplayed == True:
+            if trackDisplayed == True and time.time() - utteranceTime > utteranceTimeout:
                 # # If the mode has changed set some parameters.
                 # if modeChanged:
                 #     rollTime = time.time()
@@ -501,13 +531,13 @@ class Display(SampleBase):
                     if symbolDisplayed:
                         # If there is a symbol displayed (either full or partial) then black out part of the scrolling track name.
                         for y in range(10):
-                            graphics.DrawLine(offscreenCanvas, 0,y,symbolPosX+5,y,graphics.Color(0,0,0));
+                            graphics.DrawLine(offscreenCanvas, 0, scrollingTextPosY - y, symbolPosX+5, scrollingTextPosY - y, graphics.Color(0,0,0));
                         #print 'Symbol: %s' %symbol
                         graphics.DrawText(offscreenCanvas, symbolfont, symbolPosX, trackPosY , playerStatusColor, modeSymbol[symbol])
 
                     # Draw a black rectangle over the last few characters, then show the time remaining in mins:seconds.
                     for y in range(10):
-                        graphics.DrawLine(offscreenCanvas, 48,y,64,y,graphics.Color(0,0,0));
+                        graphics.DrawLine(offscreenCanvas, 48, scrollingTextPosY - y, 64, scrollingTextPosY - y, graphics.Color(0,0,0));
                     # Display remaining time.
                     graphics.DrawText(offscreenCanvas, dayDateFont, 49, trackPosY, trackColor, timeRemaining)
 
@@ -519,8 +549,8 @@ class Display(SampleBase):
                             trackPosX = maxX
 
             # Display the local time and date.
-            graphics.DrawText(offscreenCanvas, hourMinuteFont, timePosX, timePosY+trackPosY, timeColor, time.strftime('%H:%M'))
-            graphics.DrawText(offscreenCanvas, secondsFont, timePosX+31, timePosY+trackPosY, timeColor, time.strftime('%S'))
+            graphics.DrawText(offscreenCanvas, hourMinuteFont, timePosX, timePosY, timeColor, time.strftime('%H:%M'))
+            graphics.DrawText(offscreenCanvas, secondsFont, timePosX+31, timePosY, timeColor, time.strftime('%S'))
             # Colour the date and day based on the bin type for the week (i.e. Green waste or Recycle).
             if (dateOfNextMonday() - GreenBinReferenceDate ).days%14 == 6: 
                 #Green Bin
@@ -528,8 +558,8 @@ class Display(SampleBase):
             else:
                 # Yellow Bin
                 dayDateTextColor = yellowBinColor  
-            graphics.DrawText(offscreenCanvas, dayDateFont, dayTextPosX, dayTextPosY+trackPosY, dayDateTextColor, time.strftime('%a'))
-            graphics.DrawText(offscreenCanvas, dayDateFont, dateTextPosX, dateTextPosY+trackPosY, dayDateTextColor, time.strftime('%d %b'))              
+            graphics.DrawText(offscreenCanvas, dayDateFont, dayTextPosX, dayTextPosY, dayDateTextColor, time.strftime('%a'))
+            graphics.DrawText(offscreenCanvas, dayDateFont, dateTextPosX, dateTextPosY, dayDateTextColor, time.strftime('%d %b'))              
 
             # Display the world time and date.
             if worldTimeZone:
@@ -551,7 +581,8 @@ class Display(SampleBase):
                 graphics.DrawLine(offscreenCanvas, 0, 0, 63, 0, trackColor)
 
             # Display the utterance
-            if utteranceDisplayed:
+            #if utteranceDisplayed:
+            if time.time() - utteranceTime < utteranceTimeout:
                 utteranceLength = graphics.DrawText(offscreenCanvas, utterancefont, utterancePosX, 63, trackColor, utterance)
                 # Scroll the text from right to left.
                 if time.time() - utteranceLastScroll > scrollDelay:
@@ -562,20 +593,24 @@ class Display(SampleBase):
 
 
 
-            graphics.DrawText(offscreenCanvas, tempTextFont, temp_0_PosX, tempTextLine_0_PosY+worldTimeOffsetY, temperatureTextColor, 'Kitchen')
+            graphics.DrawText(offscreenCanvas, tempTextFont, temp_0_PosX, tempTextLine_0_PosY+worldTimeOffsetY, temperatureTextColor, 'Kit')
             graphics.DrawText(offscreenCanvas, tempFont, temp_0_PosX, tempLine_0_PosY+worldTimeOffsetY, tempColor, kitchentemp)
-            graphics.DrawText(offscreenCanvas, tempTextFont, temp_1_PosX, tempTextLine_0_PosY+worldTimeOffsetY, temperatureTextColor, 'Deck')
-            graphics.DrawText(offscreenCanvas, tempFont, temp_1_PosX, tempLine_0_PosY+worldTimeOffsetY, tempColor, decktemp)
+            graphics.DrawText(offscreenCanvas, tempTextFont, temp_1_PosX, tempTextLine_0_PosY+worldTimeOffsetY, temperatureTextColor, 'Lnge')
+            graphics.DrawText(offscreenCanvas, tempFont, temp_1_PosX, tempLine_0_PosY+worldTimeOffsetY, tempColor, formaltemp)
+            graphics.DrawText(offscreenCanvas, tempTextFont, temp_2_PosX, tempTextLine_0_PosY+worldTimeOffsetY, temperatureTextColor, 'Study')
+            graphics.DrawText(offscreenCanvas, tempFont, temp_2_PosX, tempLine_0_PosY+worldTimeOffsetY, tempColor, studytemp)
 
-            graphics.DrawText(offscreenCanvas, tempTextFont, temp_0_PosX, tempTextLine_1_PosY+worldTimeOffsetY, temperatureTextColor, 'Formal')
-            graphics.DrawText(offscreenCanvas, tempFont, temp_0_PosX, tempLine_1_PosY+worldTimeOffsetY, tempColor, formaltemp)
-            graphics.DrawText(offscreenCanvas, tempTextFont, temp_1_PosX, tempTextLine_1_PosY+worldTimeOffsetY, temperatureTextColor, 'Study')
-            graphics.DrawText(offscreenCanvas, tempFont, temp_1_PosX, tempLine_1_PosY+worldTimeOffsetY, tempColor, studytemp)
+            graphics.DrawText(offscreenCanvas, tempTextFont, temp_0_PosX, tempTextLine_1_PosY+worldTimeOffsetY, temperatureTextColor, 'Deck')
+            graphics.DrawText(offscreenCanvas, tempFont, temp_0_PosX, tempLine_1_PosY+worldTimeOffsetY, tempColor, decktemp)
+            graphics.DrawText(offscreenCanvas, tempTextFont, temp_1_PosX, tempTextLine_1_PosY+worldTimeOffsetY, temperatureTextColor, 'Pool')
+            graphics.DrawText(offscreenCanvas, tempFont, temp_1_PosX, tempLine_1_PosY+worldTimeOffsetY, tempColor, pooltemp)
+            graphics.DrawText(offscreenCanvas, tempTextFont, temp_2_PosX, tempTextLine_1_PosY+worldTimeOffsetY, temperatureTextColor, 'Spa')
+            graphics.DrawText(offscreenCanvas, tempFont, temp_2_PosX, tempLine_1_PosY+worldTimeOffsetY, tempColor, spatemp)
 
-            graphics.DrawText(offscreenCanvas, tempTextFont, temp_0_PosX, tempTextLine_2_PosY+worldTimeOffsetY, temperatureTextColor, 'Pool')
-            graphics.DrawText(offscreenCanvas, tempFont, temp_0_PosX, tempLine_2_PosY+worldTimeOffsetY, tempColor, pooltemp)
-            graphics.DrawText(offscreenCanvas, tempTextFont, temp_1_PosX, tempTextLine_2_PosY+worldTimeOffsetY, temperatureTextColor, 'Spa')
-            graphics.DrawText(offscreenCanvas, tempFont, temp_1_PosX, tempLine_2_PosY+worldTimeOffsetY, tempColor, spatemp)
+            graphics.DrawText(offscreenCanvas, tempTextFont, temp_0_PosX, tempTextLine_2_PosY+worldTimeOffsetY, temperatureTextColor, 'Cell')
+            graphics.DrawText(offscreenCanvas, tempFont, temp_0_PosX, tempLine_2_PosY+worldTimeOffsetY, tempColor, cellartemp)
+            graphics.DrawText(offscreenCanvas, tempTextFont, temp_1_PosX, tempTextLine_2_PosY+worldTimeOffsetY, temperatureTextColor, 'Wine')
+            graphics.DrawText(offscreenCanvas, tempFont, temp_1_PosX, tempLine_2_PosY+worldTimeOffsetY, tempColor, winetemp)
 
 #            time.sleep(0.035)  # <<<--- IS THIS STILL REQUIRED.
 
@@ -608,16 +643,18 @@ if __name__ == "__main__":
     trackRolledOff = False
     timeRemaining = ''
 #    localtime = '00:00 AM'
-    decktemp = '---'  + chr(126)
-    kitchentemp = '---'  + chr(126)
-    formaltemp = '---' + chr(126)
-    masterbedtemp = '---' + chr(126)
-    cellartemp = '---' + chr(126)
+    decktemp = '---'  #+ chr(126)
+    kitchentemp = '---'  #+ chr(126)
+    formaltemp = '---' #+ chr(126)
+    masterbedtemp = '---' #+ chr(126)
+    cellartemp = '---' #+ chr(126)
     cellarhumidity = '---%'
-    studytemp = '---' + chr(126)
-    garagetemp = '---' + chr(126)
-    pooltemp = '---' + chr(126)
-    spatemp = '---' + chr(126)
+    studytemp = '---' #+ chr(126)
+    garagetemp = '---' #+ chr(126)
+    pooltemp = '---' #+ chr(126)
+    spatemp = '---' #+ chr(126)
+    cellartemp = '---' #+ chr(126)
+    winetemp = '---' #+ chr(126)
 
     mqttClient.loop_start()
 
