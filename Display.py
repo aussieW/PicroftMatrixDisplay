@@ -50,14 +50,15 @@ MatrixSetBrightnessTopic = 'kitchen/display/brightness'
 MatrixGetBrightnessTopic = '/ledmatrix/mungurrahill/kitchen/getBrightness'
 
 #LocalTimeTopic = '/time/local'
-MQTTGatewayTopic = 'home/OpenMQTTGateway/#'
+MQTTGatewayTopic = 'home/OpenMQTTGateway_ESP8266_RFM_IR/#'  #OpenMQTTGateway/#'
 TemperatureTopic = 'sensor/#'
 DeckTemperatureTopic = 'sensor/temperature/deck'
 LoungeRoomTempTopic = 'sensor/temperature/lounge_room'
 StudyTempTopic = 'sensor/temperature/study'
 KitchenTempTopic = 'sensor/temperature/kitchen'
-PoolTempTopic = 'home/OpenMQTTGateway/RFM69toMQTT/99'  #'sensor/temperature/pool'
-CellarTempTopic = 'home/OpenMQTTGateway/RFM69toMQTT/98'
+PoolTempTopic = 'home/OpenMQTTGateway_ESP8266_RFM_IR/RFM69toMQTT/99' #'home/OpenMQTTGateway/RFM69toMQTT/99'  #'sensor/temperature/pool'
+MasterBedroomTempTopic = 'home/OpenMQTTGateway_ESP8266_RFM_IR/RFM69toMQTT/98'
+CellarTempTopic = 'home/OpenMQTTGateway_ESP8266_RFM_IR/RFM69toMQTT/97'
 OutsideTempTopic = 'sensor/temperature/outside'
 
 HumidityTopic = '/humidity/mungurrahill/#'
@@ -147,8 +148,8 @@ def on_connect(mqttClient, userdata, flags, rc): # Works with paho mqtt version 
     mqttClient.loop_start() #<<< WHY IS THIS ALSO IN THE __MAIN__ FUNCTION??????
 
 def on_message(mqttClient, userdata, msg):
-    global track, timeRemaining, mode, prevMode, modeChanged, decktemp, formaltemp, kitchentemp, pooltemp, spatemp, studytemp, cellartemp, winetemp, playerStoppedTime, trackRolledOff, defaultTrackPosY, trackPosY, trackDisplayed, rollTime, worldTimeZone, worldTimeOffsetY, wtCity, listening, utterance, utteranceDisplayed, utteranceTime  #, localtime
-    print('Topic: %s, \nMessage: %s' %(msg.topic, msg.payload))
+    global track, timeRemaining, mode, prevMode, modeChanged, decktemp, formaltemp, kitchentemp, pooltemp, spatemp, studytemp, cellartemp, winetemp, masterbedtemp, playerStoppedTime, trackRolledOff, defaultTrackPosY, trackPosY, trackDisplayed, rollTime, worldTimeZone, worldTimeOffsetY, wtCity, listening, utterance, utteranceDisplayed, utteranceTime  #, localtime
+    #print('Topic: %s, \nMessage: %s' %(msg.topic, msg.payload))
     if msg.topic == LMSDisplayTopic:
         track = msg.payload
         #for l in track:
@@ -162,7 +163,7 @@ def on_message(mqttClient, userdata, msg):
         # Store the time the player stopped. This is used to remove the track after a delay.
         if mode == 'stop':
             playerStoppedTime = time.time()
-            print 'Player Stopped Time: %s' %playerStoppedTime
+            #print 'Player Stopped Time: %s' %playerStoppedTime
             trackRolledOff = False
         else:
             trackPosY = defaultTrackPosY
@@ -197,6 +198,22 @@ def on_message(mqttClient, userdata, msg):
         except Exception as ex:
             template = "An exception of type {0} occurred. Arguments:\n{1!r}"
             message = template.format(type(ex).__name__, ex.args)
+            #print message
+    elif msg.topic == MasterBedroomTempTopic:
+        print("Master Bedroom")
+        print msg.payload
+        m_decode = str(msg.payload.decode("utf-8", "ignore"))
+        try:
+            data = json.loads(m_decode)
+            params = data.get("data",{})
+            print params
+            m_decode = str(params.decode("utf-8", "ignore"))
+            m_in = json.loads(m_decode)
+            masterbedtemp = str(m_in["temp"])
+            print masterbedtemp
+        except Exception as ex:
+            template = "An exception of type {0} occured. Arguments:\n{1!r}"
+            message = template.format(type(ex).__name__, ex.args)
             print message
     elif msg.topic == CellarTempTopic:
         m_decode = str(msg.payload.decode("utf-8", "ignore"))
@@ -210,7 +227,7 @@ def on_message(mqttClient, userdata, msg):
         except Exception as ex:
             template = "An exception of type {0} occurred. Arguments:\n{1!r}"
             message = template.format(type(ex).__name__, ex.args)
-            print message
+            #print message
     elif msg.topic == WakeWordTopic:
         if msg.payload == 'begin':
             listening = True
@@ -231,9 +248,9 @@ def on_message(mqttClient, userdata, msg):
             wtCity = msg.payload
             worldTimeZone = whenareyou(wtCity) #timezone(msg.payload)
             worldTimeOffsetY = defaultWorldTimeOffsetY
-            print "------- Displaying the World Time --------"
+            #print "------- Displaying the World Time --------"
         except:
-            print "+++++++ Hiding the World Time ++++++++"
+            #print "+++++++ Hiding the World Time ++++++++"
             worldTimeOffsetY = 0
             worldTimeZone = None
         return
@@ -481,7 +498,7 @@ class Display(SampleBase):
                         # If there is no symbol displayed, set up for the current mode's symbol.
                         elif symbolDisplayed == 'none':
                             symbol = mode
-                            print 'Just set symbol to %s' %symbol
+                            #print 'Just set symbol to %s' %symbol
                             symbolPosX = -5
                             trackPosXx = 1
                             r = 0
@@ -611,6 +628,9 @@ class Display(SampleBase):
             graphics.DrawText(offscreenCanvas, tempFont, temp_0_PosX, tempLine_2_PosY+worldTimeOffsetY, tempColor, cellartemp)
             graphics.DrawText(offscreenCanvas, tempTextFont, temp_1_PosX, tempTextLine_2_PosY+worldTimeOffsetY, temperatureTextColor, 'Wine')
             graphics.DrawText(offscreenCanvas, tempFont, temp_1_PosX, tempLine_2_PosY+worldTimeOffsetY, tempColor, winetemp)
+            graphics.DrawText(offscreenCanvas, tempTextFont, temp_2_PosX, tempTextLine_2_PosY+worldTimeOffsetY, temperatureTextColor, 'M Bed')
+            graphics.DrawText(offscreenCanvas, tempFont, temp_2_PosX, tempLine_2_PosY+worldTimeOffsetY, tempColor, masterbedtemp)
+
 
 #            time.sleep(0.035)  # <<<--- IS THIS STILL REQUIRED.
 
@@ -626,9 +646,10 @@ if __name__ == "__main__":
     mqttClient = MQTT.Client()
     mqttClient.on_connect = on_connect
     mqttClient.on_message = on_message
-    print("Attempting to connect")
+    #print("Attempting to connect")
+    mqttClient.username_pw_set(username="hassio",password="myhassio")
     mqttClient.connect(MQTTServer, 1883, 60)
-    print("Should be connected")
+    #print("Should be connected")
 
     # Initialise global variables.
     ### CONSIDER MOVING THESE OUTSIDE OF ANY FUNCTIONS (i.e. Near the GreenBinReferenceDate). ###
