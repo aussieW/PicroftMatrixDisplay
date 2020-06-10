@@ -2,4 +2,4 @@
 Code to interface an RGD LED Matrix with a Picroft
 
 To start:
-nohup sudo python2 kitchenDisplay_20170616.py -r32 -c4 -b45 --led-rgb-sequence=RBG &
+nohup sudo python3 ./Display.py --led-pixel-mapper=U-mapper --led-rows=32 --led-cols=64 --led-chain=2 --led-brightness=37 --led-rgb-sequence=RBG --led-slowdown-gpio 2 &
