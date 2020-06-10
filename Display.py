@@ -13,14 +13,9 @@ import random
 import datetime, time
 from pytz import timezone
 from whenareyou import whenareyou  # pip install whenareyou
-#from playsound import playsound  # pip install playsound
-#import pyaudio, wave, sys
-import subprocess
-#from PIL import Image  #<< Only included because pyinstaller doesn't work without it.
-
 import json
 
-GreenBinReferenceDate = datetime.date(2017, 01, 24)  # Tuesday of a green bin week
+GreenBinReferenceDate = datetime.date(2017,1,24)  # Tuesday of a green bin week
 defaultTrackPosY = trackPosY = 63
 #trackDisplayDelay = 300  # Number of seconds to leave the track on screen after the player mode has been changed to Stop. # << Doesn't need to be global.
 #playerStoppedTime = 0
@@ -33,6 +28,32 @@ wtCity = None
 doorBellSound = r'/home/pi/rpi-rgb-led-matrix/python/samples/Doorbell.wav'
 
 utteranceTime = 0
+utterance = ''
+
+# Initialise global variables.
+### CONSIDER MOVING THESE OUTSIDE OF ANY FUNCTIONS (i.e. Near the GreenBinReferenceDate). ###
+### THEN MAY NOT NEED THE GLOBAL DECLARATION IN on_message().                             ###
+track = ''
+utteranceDisplayed = False
+mode = None
+prevMode = mode
+modeChanged = False #True
+playerStoppedTime = None
+trackRolledOff = False
+timeRemaining = ''
+#    localtime = '00:00 AM'
+decktemp = '---'  #+ chr(126)
+kitchentemp = '---'  #+ chr(126)
+formaltemp = '---' #+ chr(126)
+masterbedtemp = '---' #+ chr(126)
+cellartemp = '---' #+ chr(126)
+cellarhumidity = '---%'
+studytemp = '---' #+ chr(126)
+garagetemp = '---' #+ chr(126)
+pooltemp = '---' #+ chr(126)
+spatemp = '---' #+ chr(126)
+cellartemp = '---' #+ chr(126)
+winetemp = '---' #+ chr(126)
 
 
 # Wakeword heard and now listening for user input.
@@ -41,24 +62,25 @@ listening = False
 import paho.mqtt.client as MQTT
 MQTTServer = '192.168.1.49'
 
-LMSDisplayTopic = '/squeezebox/pool/track'
-LMSTimeRemainingTopic = '/squeezebox/pool/remaining'
-LMSModeTopic = '/squeezebox/mode/pool'
+LMSDisplayTopic = 'squeezebox/hoytsFormalRoom/track'
+LMSTimeRemainingTopic = 'squeezebox/hoytsFormalRoom/remaining'
+LMSModeTopic = 'squeezebox/hoytsFormalRoom/mode'
 
 ControlTopic = 'kitchen/display/#'
 MatrixSetBrightnessTopic = 'kitchen/display/brightness'
 MatrixGetBrightnessTopic = '/ledmatrix/mungurrahill/kitchen/getBrightness'
 
 #LocalTimeTopic = '/time/local'
-MQTTGatewayTopic = 'home/OpenMQTTGateway_ESP8266_RFM_IR/#'  #OpenMQTTGateway/#'
-TemperatureTopic = 'sensor/#'
+MQTTGatewayTopic = 'home/OpenMQTTGateway/#'  #OpenMQTTGateway/#'
+TemperatureTopic = 'sensor/temperature/#'
 DeckTemperatureTopic = 'sensor/temperature/deck'
 LoungeRoomTempTopic = 'sensor/temperature/lounge_room'
-StudyTempTopic = 'sensor/temperature/study'
-KitchenTempTopic = 'sensor/temperature/kitchen'
-PoolTempTopic = 'home/OpenMQTTGateway_ESP8266_RFM_IR/RFM69toMQTT/99' #'home/OpenMQTTGateway/RFM69toMQTT/99'  #'sensor/temperature/pool'
-MasterBedroomTempTopic = 'home/OpenMQTTGateway_ESP8266_RFM_IR/RFM69toMQTT/98'
-CellarTempTopic = 'home/OpenMQTTGateway_ESP8266_RFM_IR/RFM69toMQTT/97'
+StudyTempTopic = 'home/OpenMQTTGateway/RFM69toMQTT/10'
+KitchenTempTopic = 'home/OpenMQTTGateway/RFM69toMQTT/50' #'sensor/temperature/kitchen'
+PoolTempTopic = 'home/OpenMQTTGateway/RFM69toMQTT/100' #'home/OpenMQTTGateway/RFM69toMQTT/99'  #'sensor/temperature/pool'
+MasterBedroomTempTopic = 'home/OpenMQTTGateway/RFM69toMQTT/20'
+CellarTempTopic = 'home/OpenMQTTGateway/RFM69toMQTT/60'
+GarageTempTopic = 'sensor/temperature/garage'
 OutsideTempTopic = 'sensor/temperature/outside'
 
 HumidityTopic = '/humidity/mungurrahill/#'
@@ -103,27 +125,6 @@ UserUtteranceTopic = 'kitchen/display/utterance'
 #        self.stream.close()
 #        self.p.terminate()
 
-class AudioFile:
-    def __init__(self, file):
-        """ Init audio stream """ 
-        self.wf = wave.open(file, 'rb')
-        self.p = pyaudio.PyAudio()
-        self.stream = self.p.open(
-            format = self.p.get_format_from_width(self.wf.getsampwidth()),
-            channels = self.wf.getnchannels(),
-            rate = self.wf.getframerate(),
-            output = True,
-            stream_callback = self.callback
-        )
-
-
-    def callback(self, in_data, frame_count, time_info, status):
-        data = self.wf.readframes(frame_Count)
-        return (data, pyaudio.paContinue)
-
-
-
-
 def dateOfNextMonday():
     today = d = datetime.date.today()
     while d.weekday() != 0:
@@ -141,23 +142,26 @@ def on_connect(mqttClient, userdata, flags, rc): # Works with paho mqtt version 
     mqttClient.subscribe(HumidityTopic)
     mqttClient.subscribe(PressureTopic)
     mqttClient.subscribe(WorldTimeTopic)
-    mqttClient.subscribe(DoorBellTopic)
+#    mqttClient.subscribe(DoorBellTopic)
     mqttClient.subscribe(ControlTopic)
     mqttClient.subscribe(MQTTGatewayTopic)
+    mqttClient.subscribe(WakeWordTopic)
     #mqttClient.subscribe(LocalTimeTopic)
-    mqttClient.loop_start() #<<< WHY IS THIS ALSO IN THE __MAIN__ FUNCTION??????
+#    mqttClient.loop_start() #<<< WHY IS THIS ALSO IN THE __MAIN__ FUNCTION??????
 
 def on_message(mqttClient, userdata, msg):
-    global track, timeRemaining, mode, prevMode, modeChanged, decktemp, formaltemp, kitchentemp, pooltemp, spatemp, studytemp, cellartemp, winetemp, masterbedtemp, playerStoppedTime, trackRolledOff, defaultTrackPosY, trackPosY, trackDisplayed, rollTime, worldTimeZone, worldTimeOffsetY, wtCity, listening, utterance, utteranceDisplayed, utteranceTime  #, localtime
-    #print('Topic: %s, \nMessage: %s' %(msg.topic, msg.payload))
+    global track, timeRemaining, mode, prevMode, modeChanged, decktemp, formaltemp, kitchentemp, pooltemp, spatemp, studytemp, cellartemp, winetemp, masterbedtemp, garagetemp, playerStoppedTime, trackRolledOff, defaultTrackPosY, trackPosY, trackDisplayed, rollTime, worldTimeZone, worldTimeOffsetY, wtCity, listening, utterance, utteranceDisplayed, utteranceTime  #, localtime
+#    print('Topic: %s, \nMessage: %s' %(msg.topic, msg.payload))
+    strPayload = "".join(chr(x) for x in msg.payload)
+    #print(strPayload)
     if msg.topic == LMSDisplayTopic:
-        track = msg.payload
+        track = strPayload #msg.payload
         #for l in track:
         #    print(ord(l))  # Print the ascii represenation of the character.
         return
     elif msg.topic == LMSModeTopic:
         prevMode = mode
-        mode = msg.payload
+        mode = strPayload #msg.payload
         modeChanged = True
         rollTime = time.time()
         # Store the time the player stopped. This is used to remove the track after a delay.
@@ -169,78 +173,90 @@ def on_message(mqttClient, userdata, msg):
             trackPosY = defaultTrackPosY
             trackDisplayed = True
         return
-    elif msg.topic == UserUtteranceTopic:
-        utterance = msg.payload
-        utteranceDisplayed = True
-        utteranceTime = time.time()
-        return
-    elif msg.topic == DeckTemperatureTopic:
-        decktemp = msg.payload #+ chr(126)
-        return
-    elif msg.topic == KitchenTempTopic:
-        kitchentemp = msg.payload #+ chr(126)
-	return
-    elif msg.topic == LoungeRoomTempTopic:
-        formaltemp = msg.payload #+ chr(126)
-        return
-    elif msg.topic == StudyTempTopic:
-        studytemp = msg.payload #+ chr(126)
-  	return
-    elif msg.topic == PoolTempTopic:
-        m_decode = str(msg.payload.decode("utf-8", "ignore"))
-        try:
-            data = json.loads(m_decode)
-            params = data.get("data",{})
-            m_decode = str(params.decode("utf-8", "ignore"))
-            m_in = json.loads(m_decode)
-            pooltemp = str(m_in["pool"]) #+ chr(126)
-            spatemp = str(m_in["spa"]) #+ chr(126)
-        except Exception as ex:
-            template = "An exception of type {0} occurred. Arguments:\n{1!r}"
-            message = template.format(type(ex).__name__, ex.args)
-            #print message
-    elif msg.topic == MasterBedroomTempTopic:
-        print("Master Bedroom")
-        print msg.payload
-        m_decode = str(msg.payload.decode("utf-8", "ignore"))
-        try:
-            data = json.loads(m_decode)
-            params = data.get("data",{})
-            print params
-            m_decode = str(params.decode("utf-8", "ignore"))
-            m_in = json.loads(m_decode)
-            masterbedtemp = str(m_in["temp"])
-            print masterbedtemp
-        except Exception as ex:
-            template = "An exception of type {0} occured. Arguments:\n{1!r}"
-            message = template.format(type(ex).__name__, ex.args)
-            print message
-    elif msg.topic == CellarTempTopic:
-        m_decode = str(msg.payload.decode("utf-8", "ignore"))
-        try:
-            data = json.loads(m_decode)
-            params = data.get("data",{})
-            m_decode = str(params.decode("utf-8", "ignore"))
-            m_in = json.loads(m_decode)
-            cellartemp = str(m_in["cellar"]) #+ chr(126)
-            winetemp = str(m_in["bottle"]) #+ chr(126)
-        except Exception as ex:
-            template = "An exception of type {0} occurred. Arguments:\n{1!r}"
-            message = template.format(type(ex).__name__, ex.args)
-            #print message
-    elif msg.topic == WakeWordTopic:
-        if msg.payload == 'begin':
-            listening = True
-        else:
-            listening = False
-        return
     elif msg.topic == LMSTimeRemainingTopic:
-        mins = str(int(msg.payload) / 60)
-        secs = str(int(msg.payload) % 60)
+ #       print('Time remaining')
+        mins = str(int(strPayload) // 60)
+        secs = str(int(strPayload) % 60)
         if len(secs) == 1:
             timeRemaining = mins + ":0" + secs
         else:
             timeRemaining = mins + ':' + secs
+ #       print('Time remaining: %s' %timeRemaining)
+        return
+    elif msg.topic == UserUtteranceTopic:
+        utterance = strPayload
+        utteranceDisplayed = True
+        utteranceTime = time.time()
+        return
+    elif msg.topic == DeckTemperatureTopic:
+        decktemp = strPayload  #"".join(chr(x) for x in msg.payload)
+        return
+    elif msg.topic == GarageTempTopic:
+        garagetemp = strPayload.strip()
+        return
+    elif msg.topic == LoungeRoomTempTopic:
+        formaltemp = "".join(chr(x) for x in msg.payload)
+        return
+#    elif msg.topic == StudyTempTopic:
+#        studytemp = "".join(chr(x) for x in msg.payload)
+#        return
+    elif msg.topic == PoolTempTopic:
+        try:
+            data = json.loads(strPayload)
+            subdata = json.loads(data['data'])
+            pooltemp = subdata['pool']
+            spatemp = subdata['spa']
+        except Exception as ex:
+            template = "An exception of type {0} occurred. Arguments:\n{1!r}"
+            message = template.format(type(ex).__name__, ex.args)
+        return
+    elif msg.topic == KitchenTempTopic:
+        #print("Garage Temp Topic")
+        #print("Payload: %s" %strPayload)
+        try:
+            data = json.loads(strPayload)
+            #print("Data: %s" %data)
+            subdata = json.loads(data['data'])
+            #print("Subdata: %s" %subdata)
+            kitchentemp = subdata['t']
+        except Exception as ex:
+            template = "An exception of type {0} occurred. Arguments:\n{1!r}"
+            message = template.format(type(ex).__name__, ex.args)
+        return
+    elif msg.topic == StudyTempTopic:
+        try:
+            data = json.loads(strPayload)
+            subdata = json.loads(data['data'])
+            studytemp = subdata['t']
+        except Exception as ex:
+            template = "An exception of type {0} occurred. Arguments:\n{1!r}"
+            message = template.format(type(ex).__name__, ex.args)
+        return
+    elif msg.topic == MasterBedroomTempTopic:
+        try:
+            data = json.loads(strPayload)
+            subdata = json.loads(data['data'])
+            masterbedtemp = subdata['t']
+        except Exception as ex:
+            template = "An exception of type {0} occured. Arguments:\n{1!r}"
+            message = template.format(type(ex).__name__, ex.args)
+#            print (message)
+        return
+    elif msg.topic == CellarTempTopic:
+        try:
+            data = json.loads(strPayload)
+            subdata = json.loads(data['data'])
+            cellartemp = subdata['t']
+        except Exception as ex:
+            template = "An exception of type {0} occured. Arguments:\n{1!r}"
+            message = template.format(type(ex).__name__, ex.args)
+#            print (message)
+        return
+    elif msg.topic == WakeWordTopic:
+        if strPayload == 'begin':
+            listening = True
+        else:
+            listening = False
         return
     elif msg.topic == WorldTimeTopic:
         # If the worldTimeZone is set to None then it will not be displayed.
@@ -261,13 +277,13 @@ def on_message(mqttClient, userdata, msg):
         #doorBellSound.close()
         #doorBellSound.stream.start_stream()
 #        subprocess.Popen(['aplay', doorBellSound]) ## <<-- THIS WORKS!
-	subprocess.Popen("aplay Doorbell.wav", shell=True)  # from https://community.mycroft.ai/t/need-help-creating-a-sounds-skill-doable-not-doable/2234
+        subprocess.Popen("aplay Doorbell.wav", shell=True)  # from https://community.mycroft.ai/t/need-help-creating-a-sounds-skill-doable-not-doable/2234
         return
     elif msg.topic == MatrixSetBrightnessTopic:
         parser.setBrightness(int(msg.payload))
         #print('Brightness set to %s' %msg.payload)
     elif msg.topic == MatrixGetBrightnessTopic:
-        print parser.getBrightness()
+        print (parser.getBrightness())
 
 #    elif msg.topic == LocalTimeTopic:
 #        localtime = msg.payload
@@ -283,33 +299,33 @@ class Display(SampleBase):
         super(Display, self).__init__(*args, **kwargs)
 
     def run(self):
-        global modeChanged, prevMode, trackRolledOff, playerStoppedTime, trackDisplayed, trackPosY, rollTime, worldTimeZone, worldTimeOffsetY, wtCity, listening, utterance, utteranceDisplayed, utteranceTime  #, trackDisplayDelay
+        global modeChanged, prevMode, trackRolledOff, playerStoppedTime, trackDisplayed, trackPosY, rollTime, worldTimeZone, worldTimeOffsetY, wtCity, listening, utterance, utteranceDisplayed, utteranceTime, timeRemaining  #, trackDisplayDelay
 
         offscreenCanvas = self.matrix.CreateFrameCanvas()
 
         # Define fonts.
         utterancefont = graphics.Font()
-        utterancefont.LoadFont("../../fonts/4x6.bdf")
+        utterancefont.LoadFont("../../../fonts/4x6.bdf")
         trackfont = utterancefont
         #trackfont.LoadFont("../../fonts/6x9.bdf")
         symbolfont = graphics.Font()
-        symbolfont.LoadFont("../../fonts/6x9_Symbols.bdf")
+        symbolfont.LoadFont("../../../fonts/6x9_Symbols.bdf")
         hourMinuteFont = graphics.Font()
-        hourMinuteFont.LoadFont("../../fonts/7x13B.bdf")
+        hourMinuteFont.LoadFont("../../../fonts/7x13B.bdf")
         secondsFont = graphics.Font()
-        secondsFont.LoadFont("../../fonts/5x7.bdf")
+        secondsFont.LoadFont("../../../fonts/5x7.bdf")
         wtCityFont = graphics.Font()
-        wtCityFont.LoadFont("../../fonts/4x6.bdf")
+        wtCityFont.LoadFont("../../../fonts/4x6.bdf")
         wtHourMinuteFont = graphics.Font()
-        wtHourMinuteFont.LoadFont("../../fonts/7x13B.bdf")
+        wtHourMinuteFont.LoadFont("../../../fonts/7x13B.bdf")
         wtSecondsFont = graphics.Font()
-        wtSecondsFont.LoadFont("../../fonts/5x7.bdf")
+        wtSecondsFont.LoadFont("../../../fonts/5x7.bdf")
         dayDateFont = graphics.Font()
-        dayDateFont.LoadFont("../../fonts/4x6.bdf")
+        dayDateFont.LoadFont("../../../fonts/4x6.bdf")
         tempTextFont = graphics.Font()
-        tempTextFont.LoadFont("../../fonts/4x6.bdf")
+        tempTextFont.LoadFont("../../../fonts/4x6.bdf")
         tempFont = graphics.Font()
-        tempFont.LoadFont("../../fonts/4x6.bdf")
+        tempFont.LoadFont("../../../fonts/4x6.bdf")
 
         # Define font colours.
         trackColor = graphics.Color(255,0,0)
@@ -330,22 +346,19 @@ class Display(SampleBase):
         #y = offscreenCanvas.height
         timePosX = 1
         timePosY = 13 ####### <<<<< Set back to 13
-        dayTextPosX = 43
+        dayTextPosX = 45 #43
         dayTextPosY = 7 #0 #7
-        dateTextPosX = 42
+        dateTextPosX = 45 #42
         dateTextPosY = 13 #13
         temp_0_PosX = 2
         temp_1_PosX = 22
         temp_2_PosX = 43
         tempTextLine_0_PosY = 20 #22 #29
-        tempLine_0_PosY = 27 #29 #36	
+        tempLine_0_PosY = 27 #29 
         tempTextLine_1_PosY = 35 #36 #43
         tempLine_1_PosY = 42 #43 #50
         tempTextLine_2_PosY = 50 #50 #57
         tempLine_2_PosY = 57 #57 #64
-        #tempLine_3_PosY = 64
-        #tempTextLine_3_PosY = 64
-	
         # Set up some configurable parameters.
         trackDisplayed = True #False   # Control whether the track is displayed.
         #print 'Went passed here again'
@@ -469,7 +482,7 @@ class Display(SampleBase):
                     graphics.DrawText(offscreenCanvas, trackfont, trackPosXx , trackPosY , trackColor, track)
                     graphics.DrawText(offscreenCanvas, symbolfont, symbolPosX, trackPosY , playerStatusColor, modeSymbol[mode])
                 elif mode == 'play':
-#                    print 'Mode changed: %s' %modeChanged
+#                    print('Mode changed: %s' %modeChanged)
 #                    print symbolDisplayed
 #                    print 'Prev Mode: %s' %prevMode
                     if modeChanged:
@@ -506,7 +519,7 @@ class Display(SampleBase):
                             symbolDisplayed = 'rollon'
                         # If the current mode's symbol is not fully displayed, scroll it on.
                         elif symbolDisplayed == 'rollon':
-                            #print symbolPosX, trackPosXx  
+                            #print symbolPosX, trackPosXx
                             if symbolPosX < 0 and trackPosXx < 6:
                                 if time.time() - rollTime > 0.25:
                                     symbolPosX += 1
@@ -535,7 +548,7 @@ class Display(SampleBase):
                                 # Draw a black rectangle to prevent the track from scrolling over the play symbol.
                                 #????????
                                 pulseTime = time.time()
-                    if symbolDisplayed <> 'None':
+                    if symbolDisplayed != 'None':
                         # Pulse the pause symbol using a sine wave to set the color.
                         if time.time() - pulseTime > .05:
                             pulseTime = time.time()
@@ -576,7 +589,7 @@ class Display(SampleBase):
                 # Yellow Bin
                 dayDateTextColor = yellowBinColor  
             graphics.DrawText(offscreenCanvas, dayDateFont, dayTextPosX, dayTextPosY, dayDateTextColor, time.strftime('%a'))
-            graphics.DrawText(offscreenCanvas, dayDateFont, dateTextPosX, dateTextPosY, dayDateTextColor, time.strftime('%d %b'))              
+            graphics.DrawText(offscreenCanvas, dayDateFont, dateTextPosX, dateTextPosY, dayDateTextColor, time.strftime('%d%b'))              
 
             # Display the world time and date.
             if worldTimeZone:
@@ -624,10 +637,10 @@ class Display(SampleBase):
             graphics.DrawText(offscreenCanvas, tempTextFont, temp_2_PosX, tempTextLine_1_PosY+worldTimeOffsetY, temperatureTextColor, 'Spa')
             graphics.DrawText(offscreenCanvas, tempFont, temp_2_PosX, tempLine_1_PosY+worldTimeOffsetY, tempColor, spatemp)
 
-            graphics.DrawText(offscreenCanvas, tempTextFont, temp_0_PosX, tempTextLine_2_PosY+worldTimeOffsetY, temperatureTextColor, 'Cell')
-            graphics.DrawText(offscreenCanvas, tempFont, temp_0_PosX, tempLine_2_PosY+worldTimeOffsetY, tempColor, cellartemp)
-            graphics.DrawText(offscreenCanvas, tempTextFont, temp_1_PosX, tempTextLine_2_PosY+worldTimeOffsetY, temperatureTextColor, 'Wine')
-            graphics.DrawText(offscreenCanvas, tempFont, temp_1_PosX, tempLine_2_PosY+worldTimeOffsetY, tempColor, winetemp)
+            graphics.DrawText(offscreenCanvas, tempTextFont, temp_0_PosX, tempTextLine_2_PosY+worldTimeOffsetY, temperatureTextColor, 'Grge')
+            graphics.DrawText(offscreenCanvas, tempFont, temp_0_PosX, tempLine_2_PosY+worldTimeOffsetY, tempColor, garagetemp)
+            graphics.DrawText(offscreenCanvas, tempTextFont, temp_1_PosX, tempTextLine_2_PosY+worldTimeOffsetY, temperatureTextColor, 'Cellar')
+            graphics.DrawText(offscreenCanvas, tempFont, temp_1_PosX, tempLine_2_PosY+worldTimeOffsetY, tempColor,cellartemp)
             graphics.DrawText(offscreenCanvas, tempTextFont, temp_2_PosX, tempTextLine_2_PosY+worldTimeOffsetY, temperatureTextColor, 'M Bed')
             graphics.DrawText(offscreenCanvas, tempFont, temp_2_PosX, tempLine_2_PosY+worldTimeOffsetY, tempColor, masterbedtemp)
 
@@ -650,32 +663,6 @@ if __name__ == "__main__":
     mqttClient.username_pw_set(username="hassio",password="myhassio")
     mqttClient.connect(MQTTServer, 1883, 60)
     #print("Should be connected")
-
-    # Initialise global variables.
-    ### CONSIDER MOVING THESE OUTSIDE OF ANY FUNCTIONS (i.e. Near the GreenBinReferenceDate). ###
-    ### THEN MAY NOT NEED THE GLOBAL DECLARATION IN on_message().                             ###
-    track = ''
-    utterance = ''
-    utteranceDisplayed = False
-    mode = None
-    prevMode = mode
-    modeChanged = False #True
-    playerStoppedTime = None
-    trackRolledOff = False
-    timeRemaining = ''
-#    localtime = '00:00 AM'
-    decktemp = '---'  #+ chr(126)
-    kitchentemp = '---'  #+ chr(126)
-    formaltemp = '---' #+ chr(126)
-    masterbedtemp = '---' #+ chr(126)
-    cellartemp = '---' #+ chr(126)
-    cellarhumidity = '---%'
-    studytemp = '---' #+ chr(126)
-    garagetemp = '---' #+ chr(126)
-    pooltemp = '---' #+ chr(126)
-    spatemp = '---' #+ chr(126)
-    cellartemp = '---' #+ chr(126)
-    winetemp = '---' #+ chr(126)
 
     mqttClient.loop_start()
 
