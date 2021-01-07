@@ -30,6 +30,9 @@ doorBellSound = r'/home/pi/rpi-rgb-led-matrix/python/samples/Doorbell.wav'
 utteranceTime = 0
 utterance = ''
 
+powerRetrieveTime = 0
+powerRetrieveDelay = 60
+
 # Initialise global variables.
 ### CONSIDER MOVING THESE OUTSIDE OF ANY FUNCTIONS (i.e. Near the GreenBinReferenceDate). ###
 ### THEN MAY NOT NEED THE GLOBAL DECLARATION IN on_message().                             ###
@@ -54,7 +57,12 @@ pooltemp = '---' #+ chr(126)
 spatemp = '---' #+ chr(126)
 cellartemp = '---' #+ chr(126)
 winetemp = '---' #+ chr(126)
-
+amybedtemp = '---' #+ chr(126)
+power_instantaneous = '---'
+#power_instantaneous = '---'
+power_1 = '---'
+power_2 = '---'
+power_3 = '---'
 
 # Wakeword heard and now listening for user input.
 listening = False
@@ -80,8 +88,12 @@ KitchenTempTopic = 'home/OpenMQTTGateway/RFM69toMQTT/50' #'sensor/temperature/ki
 PoolTempTopic = 'home/OpenMQTTGateway/RFM69toMQTT/100' #'home/OpenMQTTGateway/RFM69toMQTT/99'  #'sensor/temperature/pool'
 MasterBedroomTempTopic = 'home/OpenMQTTGateway/RFM69toMQTT/20'
 CellarTempTopic = 'home/OpenMQTTGateway/RFM69toMQTT/60'
+AmyBedroomTempTopic = 'home/OpenMQTTGateway/RFM69toMQTT/30'
 GarageTempTopic = 'sensor/temperature/garage'
 OutsideTempTopic = 'sensor/temperature/outside'
+LivePowerTopic = 'home/OpenMQTTGateway/RFM69toMQTT/150'
+PowerHistoryListenTopic = 'sensor/power/consumption'
+PowerHistoryRequestTopic = 'request/power/consumption'
 
 HumidityTopic = '/humidity/mungurrahill/#'
 DeckHumidityTopic = '/humidity/mungurrahill/deck'
@@ -146,11 +158,12 @@ def on_connect(mqttClient, userdata, flags, rc): # Works with paho mqtt version 
     mqttClient.subscribe(ControlTopic)
     mqttClient.subscribe(MQTTGatewayTopic)
     mqttClient.subscribe(WakeWordTopic)
+    mqttClient.subscribe(PowerHistoryListenTopic)
     #mqttClient.subscribe(LocalTimeTopic)
 #    mqttClient.loop_start() #<<< WHY IS THIS ALSO IN THE __MAIN__ FUNCTION??????
 
 def on_message(mqttClient, userdata, msg):
-    global track, timeRemaining, mode, prevMode, modeChanged, decktemp, formaltemp, kitchentemp, pooltemp, spatemp, studytemp, cellartemp, winetemp, masterbedtemp, garagetemp, playerStoppedTime, trackRolledOff, defaultTrackPosY, trackPosY, trackDisplayed, rollTime, worldTimeZone, worldTimeOffsetY, wtCity, listening, utterance, utteranceDisplayed, utteranceTime  #, localtime
+    global track, timeRemaining, mode, prevMode, modeChanged, decktemp, formaltemp, kitchentemp, pooltemp, spatemp, studytemp, cellartemp, winetemp, masterbedtemp, garagetemp, amybedtemp, playerStoppedTime, trackRolledOff, defaultTrackPosY, trackPosY, trackDisplayed, rollTime, worldTimeZone, worldTimeOffsetY, wtCity, listening, utterance, utteranceDisplayed, utteranceTime, power_instantaneous, power_1, power_2, power_3  #, localtime
 #    print('Topic: %s, \nMessage: %s' %(msg.topic, msg.payload))
     strPayload = "".join(chr(x) for x in msg.payload)
     #print(strPayload)
@@ -243,6 +256,7 @@ def on_message(mqttClient, userdata, msg):
 #            print (message)
         return
     elif msg.topic == CellarTempTopic:
+#        print (msg.topic)
         try:
             data = json.loads(strPayload)
             subdata = json.loads(data['data'])
@@ -252,6 +266,58 @@ def on_message(mqttClient, userdata, msg):
             message = template.format(type(ex).__name__, ex.args)
 #            print (message)
         return
+    elif msg.topic == AmyBedroomTempTopic:
+        try:
+            data = json.loads(strPayload)
+            subdata = json.loads(data['data'])
+            amybedtemp = subdata['t']
+        except Exception as ex:
+            template = "An exception of type {0} occured. Arguments:\n{1!r}"
+            message = template.format(type(ex).__name__, ex.args)
+#            print (message)
+        return
+
+    elif msg.topic == LivePowerTopic:
+        try:
+            data = json.loads(strPayload)
+            subdata = json.loads(data['data'])
+            power_instantaneous = subdata['pi']
+            if len(power_instantaneous) > 4:
+                power_instantaneous = power_instantaneous[:-(len(power_instantaneous) - 4)]
+#                print(power_instantaneous)
+            power_1 = subdata['pt']
+            if len(power_1) > 4:
+                power_1 = power_1[:-(len(power_1) -4)]
+#                print(power_total)
+        except Exception as ex:
+            template = "An exception of type {0} occured. Arguments:\n{1!r}"
+            message = template.format(type(ex).__name__, ex.args)
+#            print (message)
+        return
+
+
+    elif msg.topic == PowerHistoryListenTopic:
+        try:
+            data = json.loads(strPayload)
+            duration = data['duration']
+            if duration == 'today':
+                power_2 = str(data['value'])
+                if len(power_2) > 4:
+                    power_2 = power_2[:-(len(power_2)-4)]
+#                print(power_2)
+            elif duration == 'yesterday':
+                power_3 = str(int(data['value']))
+                if len(power_3) > 4:
+                    power_3 = power_3[:-(len(power_3)-4)]
+#                print(power_3)
+        except Exception as ex:
+            template = "An exception of type {0} occured. Arguments:\n{1!r}"
+            message = template.format(type(ex).__name__, ex.args)
+#            print (message)
+        return
+
+
+
     elif msg.topic == WakeWordTopic:
         if strPayload == 'begin':
             listening = True
@@ -299,7 +365,7 @@ class Display(SampleBase):
         super(Display, self).__init__(*args, **kwargs)
 
     def run(self):
-        global modeChanged, prevMode, trackRolledOff, playerStoppedTime, trackDisplayed, trackPosY, rollTime, worldTimeZone, worldTimeOffsetY, wtCity, listening, utterance, utteranceDisplayed, utteranceTime, timeRemaining  #, trackDisplayDelay
+        global modeChanged, prevMode, trackRolledOff, playerStoppedTime, trackDisplayed, trackPosY, rollTime, worldTimeZone, worldTimeOffsetY, wtCity, listening, utterance, utteranceDisplayed, utteranceTime, timeRemaining, power_instantaneous, power_1, power_2, power_3, powerRetrieveTime, powerRetrieveDelay  #, trackDisplayDelay
 
         offscreenCanvas = self.matrix.CreateFrameCanvas()
 
@@ -345,20 +411,20 @@ class Display(SampleBase):
         posX = 0
         #y = offscreenCanvas.height
         timePosX = 1
-        timePosY = 13 ####### <<<<< Set back to 13
-        dayTextPosX = 45 #43
-        dayTextPosY = 7 #0 #7
-        dateTextPosX = 45 #42
-        dateTextPosY = 13 #13
+        timePosY = 12 #13 ####### <<<<< Set back to 13
+        dayTextPosX = 44 #45 #43
+        dayTextPosY = 6 #7 #0 #7
+        dateTextPosX = 44 #45 #42
+        dateTextPosY = 12 #13 #13
         temp_0_PosX = 2
         temp_1_PosX = 22
         temp_2_PosX = 43
-        tempTextLine_0_PosY = 20 #22 #29
-        tempLine_0_PosY = 27 #29 
-        tempTextLine_1_PosY = 35 #36 #43
-        tempLine_1_PosY = 42 #43 #50
-        tempTextLine_2_PosY = 50 #50 #57
-        tempLine_2_PosY = 57 #57 #64
+        tempTextLine_0_PosY = 19 #20 #22 #29
+        tempLine_0_PosY = 25 #27 #29 
+        tempTextLine_1_PosY = 31 #35 #36 #43
+        tempLine_1_PosY = 37 #42 #43 #50
+        tempTextLine_2_PosY = 43 #50 #50 #57
+        tempLine_2_PosY = 49 #57 #57 #64
         # Set up some configurable parameters.
         trackDisplayed = True #False   # Control whether the track is displayed.
         #print 'Went passed here again'
@@ -622,6 +688,12 @@ class Display(SampleBase):
                         utterancePosX = maxX
 
 
+            # Retrieve latest power conumption data.
+            if time.time() - powerRetrieveTime > powerRetrieveDelay:
+                mqttClient.publish(PowerHistoryRequestTopic, 'today')
+                mqttClient.publish(PowerHistoryRequestTopic, 'yesterday')
+                powerRetrieveTime = time.time()
+
 
             graphics.DrawText(offscreenCanvas, tempTextFont, temp_0_PosX, tempTextLine_0_PosY+worldTimeOffsetY, temperatureTextColor, 'Kit')
             graphics.DrawText(offscreenCanvas, tempFont, temp_0_PosX, tempLine_0_PosY+worldTimeOffsetY, tempColor, kitchentemp)
@@ -637,12 +709,17 @@ class Display(SampleBase):
             graphics.DrawText(offscreenCanvas, tempTextFont, temp_2_PosX, tempTextLine_1_PosY+worldTimeOffsetY, temperatureTextColor, 'Spa')
             graphics.DrawText(offscreenCanvas, tempFont, temp_2_PosX, tempLine_1_PosY+worldTimeOffsetY, tempColor, spatemp)
 
-            graphics.DrawText(offscreenCanvas, tempTextFont, temp_0_PosX, tempTextLine_2_PosY+worldTimeOffsetY, temperatureTextColor, 'Grge')
-            graphics.DrawText(offscreenCanvas, tempFont, temp_0_PosX, tempLine_2_PosY+worldTimeOffsetY, tempColor, garagetemp)
-            graphics.DrawText(offscreenCanvas, tempTextFont, temp_1_PosX, tempTextLine_2_PosY+worldTimeOffsetY, temperatureTextColor, 'Cellar')
-            graphics.DrawText(offscreenCanvas, tempFont, temp_1_PosX, tempLine_2_PosY+worldTimeOffsetY, tempColor,cellartemp)
+#            graphics.DrawText(offscreenCanvas, tempTextFont, temp_0_PosX, tempTextLine_2_PosY+worldTimeOffsetY, temperatureTextColor, 'Wine')
+#            graphics.DrawText(offscreenCanvas, tempFont, temp_0_PosX, tempLine_2_PosY+worldTimeOffsetY, tempColor, cellartemp)
+            graphics.DrawText(offscreenCanvas, tempTextFont, temp_0_PosX, tempTextLine_2_PosY+worldTimeOffsetY, temperatureTextColor, 'Pwr')
+            graphics.DrawText(offscreenCanvas, tempFont, temp_0_PosX, tempLine_2_PosY+worldTimeOffsetY, tempColor, power_instantaneous)
+            graphics.DrawText(offscreenCanvas, tempFont, temp_0_PosX, tempLine_2_PosY+worldTimeOffsetY+7, tempColor, power_1)
+            graphics.DrawText(offscreenCanvas, tempTextFont, temp_1_PosX, tempTextLine_2_PosY+worldTimeOffsetY, temperatureTextColor, 'Amy')
+            graphics.DrawText(offscreenCanvas, tempFont, temp_1_PosX, tempLine_2_PosY+worldTimeOffsetY, tempColor,amybedtemp)
+            graphics.DrawText(offscreenCanvas, tempFont, temp_1_PosX, tempLine_2_PosY+worldTimeOffsetY+7, tempColor, power_2)
             graphics.DrawText(offscreenCanvas, tempTextFont, temp_2_PosX, tempTextLine_2_PosY+worldTimeOffsetY, temperatureTextColor, 'M Bed')
             graphics.DrawText(offscreenCanvas, tempFont, temp_2_PosX, tempLine_2_PosY+worldTimeOffsetY, tempColor, masterbedtemp)
+            graphics.DrawText(offscreenCanvas, tempFont, temp_2_PosX, tempLine_2_PosY+worldTimeOffsetY+7, tempColor, power_3)
 
 
 #            time.sleep(0.035)  # <<<--- IS THIS STILL REQUIRED.
