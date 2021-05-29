@@ -63,6 +63,9 @@ power_instantaneous = '---'
 power_1 = '---'
 power_2 = '---'
 power_3 = '---'
+beehivetemp = '---'
+beehivemass = '---'
+
 
 # Wakeword heard and now listening for user input.
 listening = False
@@ -91,9 +94,12 @@ CellarTempTopic = 'home/OpenMQTTGateway/RFM69toMQTT/60'
 AmyBedroomTempTopic = 'home/OpenMQTTGateway/RFM69toMQTT/30'
 GarageTempTopic = 'sensor/temperature/garage'
 OutsideTempTopic = 'sensor/temperature/outside'
-LivePowerTopic = 'home/OpenMQTTGateway/RFM69toMQTT/150'
-PowerHistoryListenTopic = 'sensor/power/consumption'
-PowerHistoryRequestTopic = 'request/power/consumption'
+PowerListenTopic = 'sensor/power/#'
+LivePowerTopic = 'sensor/power/consumption'
+PowerHistoryTopic = 'sensor/power/history'
+PowerHistoryRequestTopic = 'request/power/history'
+BeeHiveTopic = 'home/OpenMQTTGateway/RFM69toMQTT/120'
+
 
 HumidityTopic = '/humidity/mungurrahill/#'
 DeckHumidityTopic = '/humidity/mungurrahill/deck'
@@ -158,16 +164,17 @@ def on_connect(mqttClient, userdata, flags, rc): # Works with paho mqtt version 
     mqttClient.subscribe(ControlTopic)
     mqttClient.subscribe(MQTTGatewayTopic)
     mqttClient.subscribe(WakeWordTopic)
-    mqttClient.subscribe(PowerHistoryListenTopic)
+    mqttClient.subscribe(PowerListenTopic)
     #mqttClient.subscribe(LocalTimeTopic)
 #    mqttClient.loop_start() #<<< WHY IS THIS ALSO IN THE __MAIN__ FUNCTION??????
 
 def on_message(mqttClient, userdata, msg):
-    global track, timeRemaining, mode, prevMode, modeChanged, decktemp, formaltemp, kitchentemp, pooltemp, spatemp, studytemp, cellartemp, winetemp, masterbedtemp, garagetemp, amybedtemp, playerStoppedTime, trackRolledOff, defaultTrackPosY, trackPosY, trackDisplayed, rollTime, worldTimeZone, worldTimeOffsetY, wtCity, listening, utterance, utteranceDisplayed, utteranceTime, power_instantaneous, power_1, power_2, power_3  #, localtime
-#    print('Topic: %s, \nMessage: %s' %(msg.topic, msg.payload))
+    global track, timeRemaining, mode, prevMode, modeChanged, decktemp, formaltemp, kitchentemp, pooltemp, spatemp, studytemp, cellartemp, winetemp, masterbedtemp, garagetemp, amybedtemp, playerStoppedTime, trackRolledOff, defaultTrackPosY, trackPosY, trackDisplayed, rollTime, worldTimeZone, worldTimeOffsetY, wtCity, listening, utterance, utteranceDisplayed, utteranceTime, power_instantaneous, power_1, power_2, power_3, beehivetemp, beehivemass  #, localtime
+#    print('Topic: %s, \nMessage: %s, type: %s' %(msg.topic, msg.payload, type(msg.payload)))
     strPayload = "".join(chr(x) for x in msg.payload)
     #print(strPayload)
     if msg.topic == LMSDisplayTopic:
+#        print('track: %s    type: %s' %(strPayload, type(strPayload)))
         track = strPayload #msg.payload
         #for l in track:
         #    print(ord(l))  # Print the ascii represenation of the character.
@@ -266,6 +273,20 @@ def on_message(mqttClient, userdata, msg):
             message = template.format(type(ex).__name__, ex.args)
 #            print (message)
         return
+
+
+    elif msg.topic == BeeHiveTopic:
+        try:
+            data = json.loads(strPayload)
+            subdata = json.loads(data['data'])
+            beehivetemp = subdata['temp']
+            if subdata['mass']:
+                beehivemass = subdata['mass']
+        except Exception as ex:
+            template = "An exception of type {0} occured. Arguments:\n{1!r}"
+            message = template.format(type(ex).__name__, ex.args)
+        return
+
     elif msg.topic == AmyBedroomTempTopic:
         try:
             data = json.loads(strPayload)
@@ -280,15 +301,14 @@ def on_message(mqttClient, userdata, msg):
     elif msg.topic == LivePowerTopic:
         try:
             data = json.loads(strPayload)
-            subdata = json.loads(data['data'])
-            power_instantaneous = subdata['pi']
+            power_instantaneous = data['pi']
             if len(power_instantaneous) > 4:
                 power_instantaneous = power_instantaneous[:-(len(power_instantaneous) - 4)]
 #                print(power_instantaneous)
-            power_1 = subdata['pt']
+            power_1 = data['pt']
             if len(power_1) > 4:
                 power_1 = power_1[:-(len(power_1) -4)]
-#                print(power_total)
+#                print(power_1)
         except Exception as ex:
             template = "An exception of type {0} occured. Arguments:\n{1!r}"
             message = template.format(type(ex).__name__, ex.args)
@@ -296,7 +316,7 @@ def on_message(mqttClient, userdata, msg):
         return
 
 
-    elif msg.topic == PowerHistoryListenTopic:
+    elif msg.topic == PowerHistoryTopic:
         try:
             data = json.loads(strPayload)
             duration = data['duration']
@@ -365,7 +385,7 @@ class Display(SampleBase):
         super(Display, self).__init__(*args, **kwargs)
 
     def run(self):
-        global modeChanged, prevMode, trackRolledOff, playerStoppedTime, trackDisplayed, trackPosY, rollTime, worldTimeZone, worldTimeOffsetY, wtCity, listening, utterance, utteranceDisplayed, utteranceTime, timeRemaining, power_instantaneous, power_1, power_2, power_3, powerRetrieveTime, powerRetrieveDelay  #, trackDisplayDelay
+        global track, mode, modeChanged, prevMode, trackRolledOff, playerStoppedTime, trackDisplayed, trackPosY, rollTime, worldTimeZone, worldTimeOffsetY, wtCity, listening, utterance, utteranceDisplayed, utteranceTime, timeRemaining, power_instantaneous, power_1, power_2, power_3, powerRetrieveTime, powerRetrieveDelay, beehivetemp, beehivemass  #, trackDisplayDelay
 
         offscreenCanvas = self.matrix.CreateFrameCanvas()
 
@@ -471,7 +491,7 @@ class Display(SampleBase):
 
         while True:
             offscreenCanvas.Clear()
-            #print mode, trackDisplayed
+            #print('mode: %s,  trackDisplayed: %s, track: %s' %(mode, trackDisplayed, track))
             # Display track information.
             if trackDisplayed == True and time.time() - utteranceTime > utteranceTimeout:
                 # # If the mode has changed set some parameters.
@@ -623,6 +643,7 @@ class Display(SampleBase):
                                 r = 0
                             colorIndex = self.valmap(appleBreatheTable[r], 0, 254, 30, 180)
                             playerStatusColor = graphics.Color(0, 0, colorIndex)
+                    print('track: %s' %track)
                     length = graphics.DrawText(offscreenCanvas, trackfont, trackPosX , trackPosY , trackColor, track)
                     if symbolDisplayed:
                         # If there is a symbol displayed (either full or partial) then black out part of the scrolling track name.
@@ -711,15 +732,15 @@ class Display(SampleBase):
 
 #            graphics.DrawText(offscreenCanvas, tempTextFont, temp_0_PosX, tempTextLine_2_PosY+worldTimeOffsetY, temperatureTextColor, 'Wine')
 #            graphics.DrawText(offscreenCanvas, tempFont, temp_0_PosX, tempLine_2_PosY+worldTimeOffsetY, tempColor, cellartemp)
-            graphics.DrawText(offscreenCanvas, tempTextFont, temp_0_PosX, tempTextLine_2_PosY+worldTimeOffsetY, temperatureTextColor, 'Pwr')
-            graphics.DrawText(offscreenCanvas, tempFont, temp_0_PosX, tempLine_2_PosY+worldTimeOffsetY, tempColor, power_instantaneous)
-            graphics.DrawText(offscreenCanvas, tempFont, temp_0_PosX, tempLine_2_PosY+worldTimeOffsetY+7, tempColor, power_1)
+            graphics.DrawText(offscreenCanvas, tempTextFont, temp_0_PosX, tempTextLine_2_PosY+worldTimeOffsetY, temperatureTextColor, 'Hive') #'Pwr')
+            graphics.DrawText(offscreenCanvas, tempFont, temp_0_PosX, tempLine_2_PosY+worldTimeOffsetY, tempColor, beehivetemp) #power_instantaneous)
+            graphics.DrawText(offscreenCanvas, tempFont, temp_0_PosX, tempLine_2_PosY+worldTimeOffsetY+7, tempColor, beehivemass) #power_1)
             graphics.DrawText(offscreenCanvas, tempTextFont, temp_1_PosX, tempTextLine_2_PosY+worldTimeOffsetY, temperatureTextColor, 'Amy')
             graphics.DrawText(offscreenCanvas, tempFont, temp_1_PosX, tempLine_2_PosY+worldTimeOffsetY, tempColor,amybedtemp)
-            graphics.DrawText(offscreenCanvas, tempFont, temp_1_PosX, tempLine_2_PosY+worldTimeOffsetY+7, tempColor, power_2)
+#            graphics.DrawText(offscreenCanvas, tempFont, temp_1_PosX, tempLine_2_PosY+worldTimeOffsetY+7, tempColor, power_2)
             graphics.DrawText(offscreenCanvas, tempTextFont, temp_2_PosX, tempTextLine_2_PosY+worldTimeOffsetY, temperatureTextColor, 'M Bed')
             graphics.DrawText(offscreenCanvas, tempFont, temp_2_PosX, tempLine_2_PosY+worldTimeOffsetY, tempColor, masterbedtemp)
-            graphics.DrawText(offscreenCanvas, tempFont, temp_2_PosX, tempLine_2_PosY+worldTimeOffsetY+7, tempColor, power_3)
+#            graphics.DrawText(offscreenCanvas, tempFont, temp_2_PosX, tempLine_2_PosY+worldTimeOffsetY+7, tempColor, power_3)
 
 
 #            time.sleep(0.035)  # <<<--- IS THIS STILL REQUIRED.
